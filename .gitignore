@@ -1,0 +1,9 @@
+# 排除名单：虚拟环境，本地缓存，环境变量，本地运行数据库文件，字节码缓存，IDE配置，日志文件
+.venv/
+.langgraph_api/
+.env
+__pycache__/
+*.pyc
+resources/*.db
+.idea/
+*.log

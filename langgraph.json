@@ -1,0 +1,7 @@
+{
+    "dependencies": ["."],
+    "graphs": {
+        "AI_PrivateKitchen_agent": "./app/agents/AI_PrivateKitchen.py:AI_PrivateKitchen_agent"
+    },
+    "env": ".env"
+}
