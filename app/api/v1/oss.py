@@ -25,14 +25,14 @@ client = oss.Client(cfg)
 
 # OSS 域名配置
 OSS_ENDPOINT = os.getenv("OSS_ENDPOINT", "oss-cn-beijing.aliyuncs.com")
-OSS_BUCKET = os.getenv("OSS_BUCKET")
+OSS_BUCKET = os.environ["OSS_BUCKET"]
 # 上传目录及其访问地址前缀，chat接口用后者校验image_url
 UPLOAD_DIR = "uploads/"
 UPLOAD_URL_PREFIX = f"https://{OSS_BUCKET}.{OSS_ENDPOINT}/{UPLOAD_DIR}"
 
 
 @router.get("/oss/presign")
-def chat_endpoint(filename: str):
+def presign_upload(filename: str):
     # 根据文件扩展名判断 Content-Type
     content_type_map = {
         "jpg": "image/jpeg",

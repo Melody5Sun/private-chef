@@ -37,8 +37,9 @@ def tavily_search(query: str):
 chat_model = init_chat_model(
     model = "qwen3.5-plus",
     model_provider="openai",
-    base_url = os.getenv("DASHSCOPE_BASE_URL"),
-    api_key = os.getenv("DASHSCOPE_API_KEY")
+    # 缺失时直接报错：base_url为空会把请求和key发往OpenAI官方地址
+    base_url = os.environ["DASHSCOPE_BASE_URL"],
+    api_key = os.environ["DASHSCOPE_API_KEY"]
 )
 
 # 添加checkpointer
@@ -82,8 +83,11 @@ system_prompt = """
 # 每次调用模型最多携带的历史消息条数
 MAX_HISTORY_MESSAGES = 20
 
+def is_image_block(block):
+    return isinstance(block, dict) and block.get("type") in ("image", "image_url")
+
 def trim_history(messages):
-    """只把最近的消息发给模型。不修改checkpoint，历史接口仍返回完整记录。"""
+    """只把最近的消息和最新的一张图片发给模型。不修改checkpoint，历史接口仍返回完整记录。"""
     # shortcut: 按条数而非token裁剪，单条消息很长时仍可能超预算，届时把token_counter换成"approximate"
     trimmed = trim_messages(
         messages,
@@ -93,7 +97,20 @@ def trim_history(messages):
         start_on="human",
     )
     # 单轮内工具调用超过上限时，窗口里没有用户消息，退回完整历史
-    return trimmed or messages
+    trimmed = trimmed or messages
+
+    # 图片每次调用都会重新计费，只保留最新的一张，更早的换成占位文字
+    result, seen_image = [], False
+    for msg in reversed(trimmed):
+        if isinstance(msg.content, list) and any(is_image_block(b) for b in msg.content):
+            if seen_image:
+                msg = msg.model_copy(update={"content": [
+                    {"type": "text", "text": "[图片]"} if is_image_block(b) else b
+                    for b in msg.content
+                ]})
+            seen_image = True
+        result.append(msg)
+    return result[::-1]
 
 # 同步、异步都实现：FastAPI走stream，langgraph dev走astream
 class TrimHistoryMiddleware(AgentMiddleware):
@@ -145,6 +162,24 @@ def search_recipes(prompt: str, image: str, thread_id: str):
     except Exception as e:
         logger.exception(f"[错误]: 对话失败, thread_id: {thread_id}")
         yield "信息检索失败，试试看手动输入食物列表？"
+        return
+
+    # 清理失败不影响已经返回的回答
+    try:
+        prune_checkpoints(thread_id)
+    except Exception:
+        logger.exception(f"[错误]: 清理旧checkpoint失败, thread_id: {thread_id}")
+
+# 清理旧checkpoint
+def prune_checkpoints(thread_id: str):
+    """只保留最新的checkpoint。SqliteSaver每一步都整份存历史，不清理会按对话长度的平方增长。"""
+    with checkpointer.cursor() as cur:
+        for table in ("checkpoints", "writes"):
+            cur.execute(
+                f"DELETE FROM {table} WHERE thread_id = ? AND checkpoint_id < "
+                "(SELECT MAX(checkpoint_id) FROM checkpoints WHERE thread_id = ?)",
+                (thread_id, thread_id),
+            )
 
 # 清空会话
 def clear_messages(thread_id: str):
